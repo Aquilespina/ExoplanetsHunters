@@ -1,0 +1,9 @@
+pandas
+numpy
+lightkurve
+matplotlib
+sklearn
+xgboost
+shap
+ipywidgets
+future

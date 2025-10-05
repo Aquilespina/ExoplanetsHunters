@@ -318,26 +318,25 @@ with col1:
 # --- COLUMNA DERECHA: RANKING DE CANDIDATOS ---
 with col2:
     st.subheader("🏆 Ranking de Candidatos")
-    
-    # Controles en el sidebar
+
+    # (opcional) este slider puede estar fuera del with col2 sin problema
     top_n = st.sidebar.slider("Mostrar Top N candidatos", 5, 50, 15)
-    
-    # Mostrar la lista de candidatos
+
     for idx, row in df_results.head(top_n).iterrows():
-        prob = row['probability']
+        prob = float(row['probability'])
         prob_percent = prob * 100
-        
+
         c1, c2, c3 = st.columns([0.4, 0.4, 0.2])
-        
         with c1:
             st.markdown(f"**ID: {idx}**")
         with c2:
-            st.progress(prob, text=f"{prob_percent:.2f}%")
+            # Para evitar problemas de rango, usa entero 0-100
+            st.progress(int(prob_percent), text=f"{prob_percent:.2f}%")
         with c3:
-            # Botón para seleccionar el planeta y ver detalles
             if st.button("Ver", key=f"btn_{idx}"):
                 st.session_state.selected_planet_idx = idx
-                st.experimental_rerun() # Volver a ejecutar el script para actualizar la vista
+                st.rerun()  # ← reemplaza experimental_rerun por rerun
+
 
 # --- SECCIÓN DE DESCARGA (EN SIDEBAR) ---
 st.sidebar.header("📁 Fase 2: Exportar")

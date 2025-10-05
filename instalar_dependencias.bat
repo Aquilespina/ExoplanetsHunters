@@ -16,7 +16,8 @@ pip install --upgrade ^
   ipywidgets ^
   ipython ^
   jupyter ^
-  future
+  future ^
+ streamlit
 
 REM Activar widgets de Jupyter
 jupyter nbextension enable --py widgetsnbextension --sys-prefix

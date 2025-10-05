@@ -1,8 +1,6 @@
-# ExoNavigator
+<img width="1807" height="834" alt="image" src="https://github.com/user-attachments/assets/8b0f56f2-a014-43e2-8e20-fb202928fa97" /># ExoNavigator
 Herramienta interactiva para **detección y análisis de candidatos a exoplanetas**.  
 Incluye un **dashboard en Streamlit** para cargar datos, obtener **predicciones** mediante un **modelo de aprendizaje profundo** (p. ej. CNN/Transformer/MLP) o un baseline clásico (XGBoost), y visualizar resultados con **Plotly**. Además, calcula **inferencias físicas heurísticas** (temperatura de equilibrio, flujo estelar relativo, radio estimado y clase composicional + minerales/nubes probables).
-
-![Proyecto](resources\img\ExoNavigator.jpg)
 
 > **Nota de modelo**: El proyecto está preparado para usar un modelo DL **pre-entrenado** (PyTorch o TensorFlow) exportado en `./artifacts/`. También funciona con un modelo clásico (XGBoost) si lo prefieres.
 <img width="1366" height="720" alt="image" src="https://github.com/user-attachments/assets/1c25d3e7-9904-4693-9bdc-108d21db6044" />

@@ -373,7 +373,7 @@ st.markdown(f"""
 <div class="title-container">
     <img src="{NASA_LOGO_URL}" alt="NASA Logo">
     <img src="data:image/png;base64,{exoplanet_hunters_ruta_img}" width="150">
-    <h1>Exoplanets Hunters</h1>
+    <h1>ExoNavigator</h1>
     <div class="navbar">
             <div class="nav-left">
                 <img src="data:image/png;base64,{planets_img}" width="50">

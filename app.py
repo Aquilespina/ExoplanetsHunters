@@ -1,4 +1,3 @@
-# app.py
 import os
 import io
 import json
@@ -6,341 +5,346 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from joblib import load
-import matplotlib.pyplot as plt
-import seaborn as sns
+import plotly.graph_objects as go # Usaremos Plotly para gráficos más pro
 
-# -------------- CONFIG BÁSICA --------------
-st.set_page_config(page_title="Exoplanet Classifier", page_icon="🪐", layout="wide")
+# -------------- CONFIG BÁSICA DE LA PÁGINA --------------
+st.set_page_config(
+    page_title="Exoplanets Hunters",
+    page_icon="🪐",
+    layout="wide" # Layout ancho para el dashboard
+)
 
+# -------------- RUTAS Y CONSTANTES --------------
 ART_DIR = "artifacts"
 MODEL_PATH = os.path.join(ART_DIR, "model_xgb.pkl")
 SCALER_PATH = os.path.join(ART_DIR, "scaler.joblib")
 FEATS_PATH = os.path.join(ART_DIR, "feature_columns.json")
+NASA_LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/e/e5/NASA_logo.svg"
+EXOPLANET_IMG_URL = "https://exoplanets.nasa.gov/internal_resources/1633" # Imagen genérica de exoplaneta
 
-PRIMARY = "#6C63FF"
-ACCENT = "#22c55e"
-DANGER = "#ef4444"
+# -------------- ESTILOS PERSONALIZADOS (CSS) --------------
+st.markdown("""
+<style>
+    /* Ocultar el menú de Streamlit y el footer */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
 
-# -------------- ESTILOS GLOBALES --------------
-st.markdown(
-    f"""
-    <style>
-      .big-title {{
-        font-size: 2.1rem;
-        font-weight: 800;
-        margin-bottom: 0.25rem;
-      }}
-      .subtitle {{
-        color: #444;
-        margin-top: 0px;
-        margin-bottom: 1rem;
-        line-height: 1.4;
-      }}
-      .soft-card {{
-        background: #fff;
-        border: 1px solid #eee;
-        border-radius: 14px;
-        padding: 18px;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.04);
-      }}
-      .prob-bar {{
-        height: 10px;
-        border-radius: 8px;
-        background: linear-gradient(90deg, {PRIMARY}, #A09BFF);
-      }}
-      .muted {{
-        color: #6b7280; font-size: 0.93rem;
-      }}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# -------------- I18N (ES / EN) --------------
-LANGS = {
-    "es": {
-        "title": "🪐 Clasificador de Exoplanetas",
-        "subtitle": "Sube un archivo CSV con **mediciones numéricas** (características). El sistema calculará la probabilidad de que cada objeto sea un **planeta**. No necesitas experiencia: te guiamos paso a paso.",
-        "upload_header": "1) Cargar archivo CSV",
-        "upload_help": "Sube un archivo CSV. Si contiene una columna de etiqueta (por ejemplo `Planet` = 0/1), verás métricas de calidad.",
-        "example_header": "¿Qué archivo necesito? (ejemplo descargable)",
-        "example_text": "- **CSV** con **columnas numéricas** (las mismas usadas para entrenar el modelo).\n- Columna de etiqueta opcional (`Planet`/`planet`) para métricas.\n- Las columnas de texto se ignoran al predecir.\n- Descarga un **ejemplo** para probar.",
-        "download_example": "Descargar CSV de ejemplo",
-        "prep_header": "2) Preparación automática de datos",
-        "prep_shape": "Características alineadas y escaladas",
-        "predict_header": "3) Predicción",
-        "threshold": "Umbral de probabilidad para 'Planeta'",
-        "top20": "Principales 20 por probabilidad",
-        "hist": "Distribución de probabilidades",
-        "cards_threshold": "Umbral actual",
-        "cards_candidates": "Candidatos (≥ umbral)",
-        "cards_total": "Total de filas",
-        "eval_header": "4) Evaluación (opcional)",
-        "no_label_info": "No se encontró columna de etiqueta (por ej. 'Planet' o 'planet'). Agrega una para ver métricas y matriz de confusión.",
-        "acc": "Exactitud (Accuracy)",
-        "auc": "ROC AUC",
-        "confmat_title": "Matriz de confusión (normalizada)",
-        "report": "Reporte de clasificación",
-        "feat_header": "5) ¿Qué rasgos influyeron más?",
-        "feat_info": "No se pudo calcular la importancia de rasgos para este modelo.",
-        "download_header": "6) Descargar resultados",
-        "download_btn": "Descargar CSV con predicciones",
-        "footer": "Consejo: mueve el umbral en la barra lateral para ver cuántos candidatos cambian.",
-        "labels_sidebar": "Posibles nombres de la columna de etiqueta",
-        "show_confmat": "Mostrar matriz de confusión (si hay etiqueta)",
-        "need_artifacts": "No se encontraron artefactos del modelo en ./artifacts/. Exporta: model_xgb.pkl, scaler.joblib, feature_columns.json",
-        "preview": "Vista previa del archivo",
-        "start_hint": "⬆️ Sube un CSV para comenzar. También puedes descargar el ejemplo.",
-        "no_art_cols": "No se pudo mostrar la importancia de rasgos: ",
-        "planet": "Planeta",
-        "no_planet": "No-Planeta",
-    },
-    "en": {
-        "title": "🪐 Exoplanet Classifier",
-        "subtitle": "Upload a CSV with **numerical measurements** (features). The system will estimate the probability that each object is a **planet**. No expertise required: this app guides you step by step.",
-        "upload_header": "1) Upload CSV file",
-        "upload_help": "Upload a CSV file. If it contains a label column (e.g., `Planet` = 0/1), you will see quality metrics.",
-        "example_header": "What file do I need? (downloadable example)",
-        "example_text": "- **CSV** with **numeric columns** (same ones used to train the model).\n- Optional label column (`Planet`/`planet`) to show metrics.\n- Text columns are ignored for prediction.\n- Download a **sample** to try it out.",
-        "download_example": "Download sample CSV",
-        "prep_header": "2) Automatic data preparation",
-        "prep_shape": "Aligned & scaled features",
-        "predict_header": "3) Prediction",
-        "threshold": "Probability threshold for 'Planet'",
-        "top20": "Top 20 by probability",
-        "hist": "Probability distribution",
-        "cards_threshold": "Current threshold",
-        "cards_candidates": "Candidates (≥ threshold)",
-        "cards_total": "Total rows",
-        "eval_header": "4) Evaluation (optional)",
-        "no_label_info": "No label column found (e.g., 'Planet' or 'planet'). Add one to see metrics and a confusion matrix.",
-        "acc": "Accuracy",
-        "auc": "ROC AUC",
-        "confmat_title": "Confusion matrix (row-normalized)",
-        "report": "Classification report",
-        "feat_header": "5) Which features mattered most?",
-        "feat_info": "Could not compute feature importance for this model.",
-        "download_header": "6) Download results",
-        "download_btn": "Download predictions CSV",
-        "footer": "Tip: adjust the threshold in the sidebar to see how the number of candidates changes.",
-        "labels_sidebar": "Possible label column names",
-        "show_confmat": "Show confusion matrix (if label exists)",
-        "need_artifacts": "Model artifacts not found in ./artifacts/. Export: model_xgb.pkl, scaler.joblib, feature_columns.json",
-        "preview": "File preview",
-        "start_hint": "⬆️ Upload a CSV to start. You can also download the example.",
-        "no_art_cols": "Could not show feature importance: ",
-        "planet": "Planet",
-        "no_planet": "Non-Planet",
+    /* Título principal */
+    .title-container {
+        display: flex;
+        align-items: center;
+        margin-bottom: 2rem;
     }
-}
+    .title-container img {
+        width: 80px;
+        margin-right: 20px;
+    }
+    .title-container h1 {
+        font-size: 3rem;
+        font-weight: 800;
+        margin: 0;
+        color: #e2e8f0; /* Color de texto claro */
+    }
+    
+    /* Estilo para las tarjetas de información */
+    .detail-card {
+        background-color: #1e293b; /* Color de fondo secundario */
+        border-radius: 12px;
+        padding: 20px;
+        border: 1px solid #334155;
+    }
+    
+    /* Estilo para las barras de progreso personalizadas */
+    .stProgress > div > div > div > div {
+        background-image: linear-gradient(to right, #0d6efd, #8da0cb);
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# -------------- SELECTOR DE IDIOMA --------------
-with st.sidebar:
-    lang = st.selectbox("Language / Idioma", options=["es", "en"], index=0)
-T = LANGS[lang]
-
-# -------------- CABECERA --------------
-st.markdown(f'<div class="big-title">{T["title"]}</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="subtitle">{T["subtitle"]}</div>', unsafe_allow_html=True)
-
-# -------------- CARGA DE ARTEFACTOS --------------
+# -------------- CARGA DE ARTEFACTOS (CACHED) --------------
 @st.cache_resource
 def load_artifacts():
     if not (os.path.exists(MODEL_PATH) and os.path.exists(SCALER_PATH) and os.path.exists(FEATS_PATH)):
-        st.error(T["need_artifacts"])
+        st.error("No se encontraron artefactos del modelo. Asegúrate de exportar model_xgb.pkl, scaler.joblib y feature_columns.json en ./artifacts/")
         st.stop()
-    model = load(MODEL_PATH)
-    scaler = load(SCALER_PATH)
+    model = load(MODEL_PATH)            # XGBClassifier entrenado
+    scaler = load(SCALER_PATH)          # RobustScaler ajustado
     with open(FEATS_PATH, "r", encoding="utf-8") as f:
-        feat_cols = json.load(f)
+        feat_cols = json.load(f)        # columnas guardadas (fallback)
     return model, scaler, feat_cols
+# --- Cargar artefactos (SOLO UNA VEZ) ---
+model, scaler, FEATURE_COLS_JSON = load_artifacts()
 
-model, scaler, FEATURE_COLS = load_artifacts()
+def get_model_features(model, fallback_cols):
+    # 1) sklearn >= 1.0
+    if hasattr(model, "feature_names_in_") and model.feature_names_in_ is not None:
+        return list(model.feature_names_in_)
+    # 2) booster de xgboost
+    try:
+        booster = model.get_booster()
+        if getattr(booster, "feature_names", None):
+            return list(booster.feature_names)
+    except Exception:
+        pass
+    # 3) fallback al json
+    return list(fallback_cols)
 
-# -------------- BLOQUE EJEMPLO DESCARGABLE --------------
-with st.expander(T["example_header"]):
-    st.markdown(T["example_text"])
-    sample = pd.DataFrame({
-        "flux_mean": [0.02, -0.15, 0.08, 0.33, -0.05],
-        "std_flux": [1.1, 0.9, 1.4, 0.8, 1.2],
-        "duration": [2.3, 1.8, 2.9, 3.1, 2.2],
-        "depth": [0.001, 0.004, 0.011, 0.030, 0.0006],
-        "Planet": [0, 1, 1, 1, 0],
-    })
-    buf = io.BytesIO()
-    sample.to_csv(buf, index=False)
-    st.download_button(T["download_example"], data=buf.getvalue(),
-                       file_name="sample_exoplanets.csv", mime="text/csv")
+def get_scaler_features(scaler, fallback_cols):
+    if hasattr(scaler, "feature_names_in_") and scaler.feature_names_in_ is not None:
+        return list(scaler.feature_names_in_)
+    return list(fallback_cols)
 
-# -------------- SIDEBAR (CONTROLES) --------------
-st.sidebar.header("Controls / Controles")
-threshold = st.sidebar.slider(T["threshold"], 0.0, 1.0, 0.5, 0.01)
-show_confmat = st.sidebar.checkbox(T["show_confmat"], value=True)
-label_candidates = st.sidebar.multiselect(
-    T["labels_sidebar"],
-    options=["Planet", "planet", "label", "label_meta", "koi_disposition", "koi_pdisposition"],
-    default=["Planet", "planet"]
-)
+MODEL_FEATURES  = get_model_features(model, FEATURE_COLS_JSON)    # columnas que espera el MODELO (orden)
+SCALER_FEATURES = get_scaler_features(scaler, FEATURE_COLS_JSON)  # columnas que espera el SCALER (orden)
 
-# -------------- HELPERS --------------
-def coerce_numeric(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    for c in out.columns:
-        # mantenemos strings en otras columnas para devolverlas mezcladas si el usuario quiere
-        try:
-            out[c] = pd.to_numeric(out[c], errors="ignore")
-        except Exception:
-            pass
-    return out
 
+
+# -------------- HELPERS (Funciones de ayuda) --------------
 def align_and_scale(df_raw: pd.DataFrame, scaler, feature_cols: list) -> pd.DataFrame:
-    df = coerce_numeric(df_raw)
+    df = df_raw.copy()
+    numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+    
     for c in feature_cols:
         if c not in df.columns:
-            df[c] = 0.0
-    X = df[feature_cols].apply(pd.to_numeric, errors="coerce")
-    X = X.fillna(X.median())
+            df[c] = 0.0 # Rellenar con 0 si falta alguna columna esperada
+            
+    X = df[feature_cols].apply(pd.to_numeric, errors='coerce')
+    X = X.fillna(X.median()) # Rellenar NaNs con la mediana
     X_scaled = pd.DataFrame(scaler.transform(X), columns=feature_cols, index=df.index)
     return X_scaled
 
-def find_label_column(df: pd.DataFrame, candidates: list) -> str | None:
-    for c in candidates:
-        if c in df.columns:
-            return c
-    return None
+# --- Helper crítico: preparar datos para SCALER y para el MODELO ---
+def align_and_scale_for_model(df_raw, scaler, scaler_feats, model_feats):
+    """
+    1) Prepara EXACTAMENTE las columnas que espera el SCALER (scaler_feats):
+        - Crea faltantes con 0.0
+        - Ordena como scaler_feats
+        - Convierte a numérico y rellena NaN con la mediana
+        - Aplica scaler.transform(...)
+    2) A partir del DataFrame escalado, construye EXACTAMENTE lo que espera el MODELO (model_feats):
+        - Toma columnas comunes (mismo orden del modelo)
+        - Crea faltantes con 0.0
+        - Devuelve DataFrame escalado y matriz NumPy lista para XGBoost (orden model_feats)
+    """
+    df = df_raw.copy()
 
-# -------------- PASO 1: CARGA DE CSV --------------
-st.subheader(T["upload_header"])
-st.caption(T["upload_help"])
-uploaded = st.file_uploader("CSV", type=["csv"])
+    # --- Para el SCALER ---
+    for c in scaler_feats:
+        if c not in df.columns:
+            df[c] = 0.0
+
+    # Solo columnas del scaler y en ese orden
+    df_s = df[scaler_feats].apply(pd.to_numeric, errors="coerce")
+    # Imputar medianas (solo numéricas)
+    df_s = df_s.fillna(df_s.median(numeric_only=True))
+
+    # Validar dimensión esperada por el scaler
+    if df_s.shape[1] != len(scaler_feats):
+        raise ValueError(
+            f"X tiene {df_s.shape[1]} columnas, pero el scaler espera {len(scaler_feats)}. "
+            f"Revisa que SCALER_FEATURES esté bien definido."
+        )
+
+    # Escalar
+    X_scaled = scaler.transform(df_s)
+    df_scaled = pd.DataFrame(X_scaled, columns=scaler_feats, index=df.index)
+
+    # --- Para el MODELO ---
+    # Columnas comunes ya escaladas
+    common = [c for c in model_feats if c in df_scaled.columns]
+    X_model_df = df_scaled[common].copy()
+
+    # Columnas que el modelo espera pero no existen en el escalado (añadir 0.0)
+    missing_for_model = [c for c in model_feats if c not in df_scaled.columns]
+    for c in missing_for_model:
+        X_model_df[c] = 0.0
+
+    # Orden EXACTO del modelo
+    X_model_df = X_model_df[model_feats]
+
+    # NumPy para evitar validación por nombres en xgboost
+    X_model_np = X_model_df.to_numpy(dtype=np.float32, copy=False)
+
+    return df_scaled, X_model_np
+
+# Inicializar estado de sesión para guardar el planeta seleccionado
+if 'selected_planet_idx' not in st.session_state:
+    st.session_state.selected_planet_idx = None
+
+# -------------- HEADER DE LA APLICACIÓN --------------
+st.markdown(f"""
+<div class="title-container">
+    <img src="{NASA_LOGO_URL}" alt="NASA Logo">
+    <h1>Exoplanets Hunters</h1>
+</div>
+""", unsafe_allow_html=True)
+# -------------- ZONA DE CARGA DE ARCHIVO (SIDEBAR) --------------
+st.sidebar.header("🚀 Fase 1: Cargar Datos")
+
+uploaded = st.sidebar.file_uploader(
+    "📂 Sube tu archivo CSV con datos de candidatos a exoplanetas.",
+    type=["csv"],
+    help="El archivo debe contener las columnas numéricas utilizadas para el modelo. "
+         "Las filas corruptas o con errores serán ignoradas automáticamente."
+)
+
 if uploaded is None:
-    st.info(T["start_hint"])
+    st.info("🛰️ **Bienvenido a Exoplanets Hunters.** Carga un archivo CSV en la barra lateral para comenzar el análisis.")
     st.stop()
 
-df_in = pd.read_csv(uploaded, comment="#")
-st.markdown(f"**{T['preview']}**")
-st.dataframe(df_in.head(), use_container_width=True)
-
-# -------------- PASO 2: PREPARACIÓN --------------
-st.subheader(T["prep_header"])
-X_scaled = align_and_scale(df_in, scaler, FEATURE_COLS)
-st.write(f"{T['prep_shape']}: {X_scaled.shape}")
-st.dataframe(X_scaled.head(), use_container_width=True)
-
-# -------------- PASO 3: PREDICCIÓN --------------
-st.subheader(T["predict_header"])
-probs = model.predict_proba(X_scaled)[:, 1]
-preds = (probs >= threshold).astype(int)
-
-out = pd.DataFrame({"pred_prob": probs, "pred_label": preds}, index=df_in.index)
-
-left, right = st.columns([1, 1])
-with left:
-    st.markdown(f"**{T['top20']}**")
-    top = out.sort_values("pred_prob", ascending=False).head(20).copy()
-    top_show = top[["pred_prob", "pred_label"]].copy()
-    top_show["pred_label"] = top_show["pred_label"].map({1: T["planet"], 0: T["no_planet"]})
-    st.dataframe(top_show, use_container_width=True)
-
-with right:
-    st.markdown(f"**{T['hist']}**")
-    fig, ax = plt.subplots(figsize=(5.5, 3.8))
-    sns.histplot(probs, bins=30, kde=False, ax=ax)
-    ax.set_xlabel("P(Planet)")
-    ax.set_ylabel("Count")
-    ax.set_title("Histogram")
-    st.pyplot(fig)
-
-c1, c2, c3 = st.columns(3)
-with c1:
-    st.markdown('<div class="soft-card">', unsafe_allow_html=True)
-    st.markdown(f"**{T['cards_threshold']}**")
-    st.markdown(f"<h3>{int(threshold*100)}%</h3>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-with c2:
-    st.markdown('<div class="soft-card">', unsafe_allow_html=True)
-    st.markdown(f"**{T['cards_candidates']}**")
-    st.markdown(f"<h3>{int((probs>=threshold).sum())}</h3>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-with c3:
-    st.markdown('<div class="soft-card">', unsafe_allow_html=True)
-    st.markdown(f"**{T['cards_total']}**")
-    st.markdown(f"<h3>{len(probs)}</h3>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# -------------- PASO 4: EVALUACIÓN (OPCIONAL) --------------
-st.subheader(T["eval_header"])
-if show_confmat:
-    lbl_col = find_label_column(df_in, label_candidates)
-    if lbl_col is None:
-        st.info(T["no_label_info"])
-    else:
-        y_true_raw = df_in[lbl_col].astype(str).str.upper().str.strip()
-        map_pos = {"1", "PLANET", "TRUE", "PC", "CANDIDATE", "CONFIRMED"}
-        y_true = y_true_raw.apply(lambda v: 1 if v in map_pos or v == "1" else 0).values
-
-        from sklearn.metrics import confusion_matrix, roc_auc_score, accuracy_score, classification_report
-        cm = confusion_matrix(y_true, preds)
-        acc = accuracy_score(y_true, preds)
-        try:
-            auc = roc_auc_score(y_true, probs)
-        except Exception:
-            auc = np.nan
-
-        m1, m2 = st.columns(2)
-        with m1:
-            st.markdown('<div class="soft-card">', unsafe_allow_html=True)
-            st.markdown(f"**{T['acc']}**")
-            st.markdown(f"<h3>{acc:.4f}</h3>", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-        with m2:
-            st.markdown('<div class="soft-card">', unsafe_allow_html=True)
-            st.markdown(f"**{T['auc']}**")
-            st.markdown(f"<h3>{'N/A' if np.isnan(auc) else f'{auc:.4f}'}</h3>", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        cmn = cm.astype(float) / cm.sum(axis=1, keepdims=True)
-        fig2, ax2 = plt.subplots(figsize=(5.5, 5.0))
-        sns.heatmap(cmn, annot=True, fmt=".2f", cmap="rocket_r",
-                    xticklabels=[T["no_planet"], T["planet"]],
-                    yticklabels=[T["no_planet"], T["planet"]],
-                    cbar=True, ax=ax2)
-        ax2.set_title(T["confmat_title"])
-        ax2.set_xlabel("Predicted")
-        ax2.set_ylabel("True")
-        st.pyplot(fig2)
-
-        with st.expander(f"📜 {T['report']}"):
-            st.text(classification_report(y_true, preds, target_names=[T["no_planet"], T["planet"]]))
-
-# -------------- PASO 5: IMPORTANCIA DE RASGOS --------------
-st.subheader(T["feat_header"])
+# Intentar leer el CSV de forma segura
 try:
-    importances = None
-    if hasattr(model, "feature_importances_"):
-        importances = pd.Series(model.feature_importances_, index=FEATURE_COLS).sort_values(ascending=False)
-    else:
-        booster = model.get_booster()
-        gain = booster.get_score(importance_type="gain")
-        importances = pd.Series(gain).reindex(FEATURE_COLS).fillna(0.0).sort_values(ascending=False)
+    import csv
 
-    if importances is not None and importances.sum() > 0:
-        topk = importances.head(20)
-        fig3, ax3 = plt.subplots(figsize=(6.5, 6.0))
-        topk.sort_values().plot(kind="barh", ax=ax3)
-        ax3.set_title("Top-20 Feature Importance")
-        ax3.set_xlabel("Importance")
-        st.pyplot(fig3)
-    else:
-        st.info(T["feat_info"])
+    # Detectar automáticamente el delimitador
+    sample = uploaded.read(4096).decode("utf-8", errors="ignore")
+    uploaded.seek(0)
+    sniffer = csv.Sniffer()
+    delimiter = sniffer.sniff(sample).delimiter if sample else ","
+
+    # Leer con manejo de errores
+    df_in = pd.read_csv(
+        uploaded,
+        sep=delimiter,
+        comment="#",
+        on_bad_lines="skip",  # ignora filas con columnas inconsistentes
+        low_memory=False
+    )
+
+    st.success(f"✅ Archivo cargado correctamente con delimitador detectado: '{delimiter}'")
+    st.write("**Dimensiones del archivo:**", df_in.shape)
+    st.dataframe(df_in.head())
+
 except Exception as e:
-    st.info(T["no_art_cols"] + str(e))
+    st.error("⚠️ Ocurrió un error al leer el CSV. Revisa el formato del archivo.")
+    st.exception(e)
+    st.stop()
 
-# -------------- PASO 6: DESCARGA --------------
-st.subheader(T["download_header"])
-out_to_download = pd.concat([df_in.reset_index(drop=True), out.reset_index(drop=True)], axis=1)
-csv_bytes = out_to_download.to_csv(index=False).encode("utf-8")
-st.download_button(f"⬇️ {T['download_btn']}", data=csv_bytes,
-                   file_name="predictions_exoplanets.csv", mime="text/csv")
 
-st.markdown(f'<div class="muted">{T["footer"]}</div>', unsafe_allow_html=True)
+# --- Realizar predicciones (corazón de la app) ---
+# Preprocesar correctamente con las columnas del scaler y del modelo
+df_scaled, X_np = align_and_scale_for_model(
+    df_in,
+    scaler,
+    scaler_feats=SCALER_FEATURES,   # columnas usadas por el scaler
+    model_feats=MODEL_FEATURES      # columnas esperadas por el modelo
+)
+
+# Calcular probabilidades de clase con el modelo entrenado
+# Evita errores de nombres con XGBoost usando inplace_predict sobre NumPy:
+probs = model.get_booster().inplace_predict(X_np)
+preds = (probs >= 0.5).astype(int)  # o ajusta el umbral desde el sidebar si lo agregas
+
+# Crear un DataFrame con los resultados
+df_results = df_in.copy()
+df_results['probability'] = probs
+df_results['pred'] = preds
+df_results = df_results.sort_values('probability', ascending=False).reset_index(drop=True)
+
+# -------------------- DASHBOARD PRINCIPAL --------------------
+st.markdown("---")
+col1, col2 = st.columns([0.6, 0.4]) # Dividir en dos columnas
+
+# --- COLUMNA IZQUIERDA: VISUALIZACIÓN DE DATOS ---
+with col1:
+    st.subheader("🔭 Explorador de Características")
+    
+    # Selectores para el gráfico de dispersión
+    numeric_cols = df_in.select_dtypes(include=np.number).columns.tolist()
+    
+    # Asegurarse de que haya al menos 2 columnas numéricas
+    if len(numeric_cols) >= 2:
+        x_axis = st.selectbox("Eje X", options=numeric_cols, index=0)
+        y_axis = st.selectbox("Eje Y", options=numeric_cols, index=1 if len(numeric_cols) > 1 else 0)
+        
+        # Crear gráfico de dispersión con Plotly
+        fig = go.Figure(data=go.Scatter(
+            x=df_results[x_axis],
+            y=df_results[y_axis],
+            mode='markers',
+            marker=dict(
+                size=8,
+                color=df_results['probability'], # Color basado en la probabilidad
+                colorscale='Viridis', # Paleta de colores
+                showscale=True,
+                colorbar=dict(title="Probabilidad")
+            ),
+            text=[f"Prob: {p:.2%}" for p in df_results['probability']], # Tooltip
+            hoverinfo='text+x+y'
+        ))
+
+        fig.update_layout(
+            title=f'Relación entre {x_axis} y {y_axis}',
+            xaxis_title=x_axis,
+            yaxis_title=y_axis,
+            template='plotly_dark', # Tema oscuro para el gráfico
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("El archivo CSV no contiene suficientes columnas numéricas para generar un gráfico de dispersión.")
+
+    # Detalle del planeta seleccionado (se muestra aquí)
+    st.subheader("🌌 Ficha del Candidato Seleccionado")
+    if st.session_state.selected_planet_idx is not None:
+        planet_data = df_results.loc[st.session_state.selected_planet_idx]
+        prob_percent = planet_data['probability'] * 100
+        
+        with st.container():
+            st.markdown('<div class="detail-card">', unsafe_allow_html=True)
+            
+            c1, c2 = st.columns([0.4, 0.6])
+            with c1:
+                st.image(EXOPLANET_IMG_URL, caption=f"Recreación artística")
+            
+            with c2:
+                st.markdown(f"#### Candidato ID: {st.session_state.selected_planet_idx}")
+                st.markdown(f"### Probabilidad de ser Exoplaneta:")
+                st.markdown(f"<h1 style='color: #8da0cb;'>{prob_percent:.2f}%</h1>", unsafe_allow_html=True)
+
+            st.markdown("---")
+            st.markdown("**Datos principales:**")
+            
+            # Mostrar algunas de las características más importantes
+            display_cols = [col for col in planet_data.index if col != 'probability' and col in numeric_cols[:5]]
+            st.dataframe(planet_data[display_cols], use_container_width=True)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.info("Selecciona un candidato de la lista de la derecha para ver sus detalles.")
+
+# --- COLUMNA DERECHA: RANKING DE CANDIDATOS ---
+with col2:
+    st.subheader("🏆 Ranking de Candidatos")
+    
+    # Controles en el sidebar
+    top_n = st.sidebar.slider("Mostrar Top N candidatos", 5, 50, 15)
+    
+    # Mostrar la lista de candidatos
+    for idx, row in df_results.head(top_n).iterrows():
+        prob = row['probability']
+        prob_percent = prob * 100
+        
+        c1, c2, c3 = st.columns([0.4, 0.4, 0.2])
+        
+        with c1:
+            st.markdown(f"**ID: {idx}**")
+        with c2:
+            st.progress(prob, text=f"{prob_percent:.2f}%")
+        with c3:
+            # Botón para seleccionar el planeta y ver detalles
+            if st.button("Ver", key=f"btn_{idx}"):
+                st.session_state.selected_planet_idx = idx
+                st.experimental_rerun() # Volver a ejecutar el script para actualizar la vista
+
+# --- SECCIÓN DE DESCARGA (EN SIDEBAR) ---
+st.sidebar.header("📁 Fase 2: Exportar")
+csv_bytes = df_results.to_csv(index=False).encode("utf-8")
+st.sidebar.download_button(
+    label="⬇️ Descargar Resultados con Predicciones",
+    data=csv_bytes,
+    file_name="exoplanet_predictions.csv",
+    mime="text/csv",
+)

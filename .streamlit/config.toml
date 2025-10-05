@@ -1,0 +1,6 @@
+[theme]
+primaryColor="#0d6efd" # Azul brillante para botones y elementos interactivos
+backgroundColor="#0f172a" # Fondo azul muy oscuro (casi negro)
+secondaryBackgroundColor="#1e293b" # Color para tarjetas y contenedores
+textColor="#e2e8f0" # Color de texto principal (blanco pálido)
+font="sans serif"

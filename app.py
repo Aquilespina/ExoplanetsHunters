@@ -168,6 +168,183 @@ def align_and_scale_for_model(df_raw, scaler, scaler_feats, model_feats):
 
     return df_scaled, X_model_np
 
+# ---------- INFERENCIAS FÍSICAS (moved up) ----------
+RSUN_TO_REARTH = 109.2  # 1 R☉ = 109.2 R⊕
+ALBEDO_DEFAULT = 0.3
+
+COLS = {
+    "teff": ["st_teff", "koi_steff", "teff", "TSTAR"],
+    "rstar_rsun": ["st_rad", "koi_srad", "rstar", "RSTAR"],
+    "sma_au": ["koi_sma", "sma", "a", "semi_major_axis", "SMA_AU"],
+    "insol_searth": ["koi_insol", "insol", "insolation", "S_inc", "flux"],
+    "rp_re": ["koi_prad", "planet_radius_earth", "rp_re", "Rp (Re)"],
+    "rp_rj": ["planet_radius_jupiter", "rp_rj", "Rp (Rj)"],
+    "depth": ["koi_depth", "transit_depth", "depth", "depth_ppm", "DEPTH_PPM"],
+}
+
+def _get_first(series_or_dict, keys):
+    for k in keys:
+        if k in series_or_dict and pd.notnull(series_or_dict[k]):
+            val = series_or_dict[k]
+            if isinstance(val, (int, float, np.floating)) or (isinstance(val, str) and val.strip() != ""):
+                return val
+    return None
+
+def infer_insolation_Searth(row):
+    """Flujo estelar relativo (S⊕). Usa columna directa si existe; si no,
+    aproxima con (Teff/5772)^4 * (R*/a)^2, con R* en R☉ y a en AU."""
+    s = _get_first(row, COLS["insol_searth"])
+    if s is not None:
+        try:
+            return float(s)
+        except Exception:
+            pass
+
+    teff = _get_first(row, COLS["teff"])
+    rstar = _get_first(row, COLS["rstar_rsun"])
+    a = _get_first(row, COLS["sma_au"])
+    try:
+        teff = float(teff) if teff is not None else None
+        rstar = float(rstar) if rstar is not None else None
+        a = float(a) if a is not None else None
+    except Exception:
+        return None
+
+    if None in (teff, rstar, a) or a <= 0:
+        return None
+    return (teff / 5772.0) ** 4 * (rstar ** 2) / (a ** 2)
+
+def infer_teq_K(row, albedo=ALBEDO_DEFAULT):
+    """Temperatura de equilibrio (K).
+    Si hay S⊕: Teq ≈ 278.5 * [(1-A)*S]^(1/4).
+    Si no, usa Teq ≈ Teff * sqrt(R*/(2a)) * (1-A)^(1/4)."""
+    S = infer_insolation_Searth(row)
+    if S is not None and S > 0:
+        return 278.5 * ((1 - albedo) * S) ** 0.25
+
+    teff = _get_first(row, COLS["teff"])
+    rstar = _get_first(row, COLS["rstar_rsun"])
+    a = _get_first(row, COLS["sma_au"])
+    try:
+        teff = float(teff) if teff is not None else None
+        rstar = float(rstar) if rstar is not None else None
+        a = float(a) if a is not None else None
+    except Exception:
+        return None
+
+    if None in (teff, rstar, a) or a <= 0:
+        return None
+    return teff * np.sqrt(rstar / (2.0 * a)) * ((1 - albedo) ** 0.25)
+
+def infer_radius_Re(row):
+    """Radio planetario en radios terrestres.
+    Usa columna directa si existe; si no, deriva de profundidad de tránsito y R*."""
+    rp_re = _get_first(row, COLS["rp_re"])
+    if rp_re is not None:
+        try:
+            return float(rp_re)
+        except Exception:
+            pass
+
+    rp_rj = _get_first(row, COLS["rp_rj"])
+    if rp_rj is not None:
+        try:
+            return float(rp_rj) * 11.21  # 1 Rj = 11.21 Re
+        except Exception:
+            pass
+
+    depth = _get_first(row, COLS["depth"])
+    rstar = _get_first(row, COLS["rstar_rsun"])
+    try:
+        depth = float(depth) if depth is not None else None
+        rstar = float(rstar) if rstar is not None else None
+    except Exception:
+        return None
+
+    if rstar is None or depth is None or depth <= 0:
+        return None
+
+    # profundidad puede venir en ppm o fracción:
+    if depth > 1:  # asume ppm
+        delta = depth / 1e6
+    else:
+        delta = depth  # ya es fracción
+
+    if delta <= 0:
+        return None
+
+    rp_rsun = np.sqrt(delta) * rstar
+    return rp_rsun * RSUN_TO_REARTH
+
+def classify_composition(rp_re, teq_k):
+    """Clasificación composicional simple + 'probabilidades' heurísticas."""
+    if rp_re is None:
+        return "Desconocida", [0.0, 0.0, 0.0]  # [rocosa, volátiles, gigante]
+
+    if rp_re < 1.6:
+        base = np.array([0.8, 0.2, 0.0])
+    elif rp_re < 3.0:
+        base = np.array([0.3, 0.6, 0.1])
+    else:
+        base = np.array([0.05, 0.25, 0.70])
+
+    if teq_k is not None:
+        if teq_k < 220 and rp_re < 2.5:
+            base += np.array([0.0, 0.10, 0.0])
+        if teq_k > 1200 and rp_re < 2.5:
+            base += np.array([0.10, -0.10, 0.0])
+        if rp_re > 6:
+            base = np.array([0.02, 0.08, 0.90])
+
+    base = np.clip(base, 0, None)
+    if base.sum() == 0:
+        probs = [0.0, 0.0, 0.0]
+    else:
+        probs = (base / base.sum()).tolist()
+
+    label = (
+        "Rocosa" if rp_re < 1.6 else
+        "Sub-Neptuno / H2O-rico" if rp_re < 3.0 else
+        "Gigante gaseoso"
+    )
+    return label, probs
+
+def habitable_zone_flag(S):
+    if S is None:
+        return "Desconocida"
+    if 0.35 <= S <= 1.75:
+        return "≈ Zona habitable (aprox.)"
+    if S < 0.35:
+        return "Exterior a HZ"
+    return "Interior a HZ"
+
+def likely_minerals(label, teq_k):
+    """Listado orientativo de especies/minerales de nubes/superficie."""
+    if teq_k is None:
+        teq_k = 0
+    if label == "Gigante gaseoso":
+        if teq_k < 200:
+            return "Hielo de CH₄/NH₃; nubes de NH₃; H/He dominante"
+        if teq_k < 800:
+            return "Nubes de H₂O/NH₄SH; H/He dominante"
+        if teq_k < 1400:
+            return "Na₂S/KCl posibles; H/He dominante"
+        return "Nubes silicatadas (MgSiO₃), Fe; H/He dominante"
+    elif "Rocosa" in label:
+        if teq_k < 250:
+            return "Hielo de H₂O/CO₂; silicatos y Fe"
+        if teq_k < 700:
+            return "Silicatos (olivino, piroxeno), Fe; posible H₂O"
+        if teq_k < 1400:
+            return "Silicatos deshidratados; óxidos (FeO, Al₂O₃)"
+        return "Superficies ultracalientes: evaporitas, SiO; posibles vapores metálicos"
+    else:  # Sub-Neptuno
+        if teq_k < 300:
+            return "H₂O/NH₃/CH₄; mezcla roca-hielo"
+        if teq_k < 1000:
+            return "H₂O/volátiles; brumas orgánicas"
+        return "Atmósferas tenues; posibles nubes de sales (KCl/Na₂S)"
+
 # Inicializar estado de sesión para guardar el planeta seleccionado
 if 'selected_planet_idx' not in st.session_state:
     st.session_state.selected_planet_idx = None
@@ -312,6 +489,72 @@ with col1:
             st.dataframe(planet_data[display_cols], use_container_width=True)
             
             st.markdown('</div>', unsafe_allow_html=True)
+            # === NUEVO: cálculos de inferencia para este candidato ===
+            planet_data = df_results.loc[st.session_state.selected_planet_idx]
+            prob_percent = planet_data['probability'] * 100
+
+            S_earth = infer_insolation_Searth(planet_data)      # flujo relativo a la Tierra
+            Teq = infer_teq_K(planet_data)                      # K
+            Rp_Re = infer_radius_Re(planet_data)                # radios terrestres
+            comp_label, comp_probs = classify_composition(Rp_Re, Teq)
+            hz_flag = habitable_zone_flag(S_earth)
+            minerals = likely_minerals(comp_label, Teq)
+
+            # Normalizaciones para evitar 'nan'
+            S_text = f"{S_earth:.2f} S⊕" if S_earth is not None else "N/D"
+            Teq_text = f"{Teq:.0f} K" if Teq is not None else "N/D"
+            Rp_text = f"{Rp_Re:.2f} R⊕" if Rp_Re is not None else "N/D"
+
+            # === GRÁFICO: Gauge de Temperatura de Equilibrio ===
+            if Teq is not None and np.isfinite(Teq):
+                fig_teq = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=float(Teq),
+                    number={"suffix": " K"},
+                    gauge={
+                        "axis": {"range": [0, 3000]},
+                        "bar": {"thickness": 0.3},
+                        "threshold": {"line": {"width": 2}, "thickness": 0.75, "value": float(Teq)}
+                    },
+                    title={"text": "Temperatura de equilibrio"}
+                ))
+                fig_teq.update_layout(template="plotly_dark", height=250, margin=dict(t=40, b=20, l=10, r=10))
+            else:
+                fig_teq = None
+
+            # === GRÁFICO: Barras de prob. composicional ===
+            comp_cats = ["Rocosa", "Volátiles", "Gigante"]
+            fig_comp = go.Figure(go.Bar(
+                x=comp_cats, y=comp_probs,
+                text=[f"{p*100:.0f}%" for p in comp_probs],
+                textposition="outside"
+            ))
+            fig_comp.update_layout(
+                title="Composición probable (heurística)",
+                yaxis=dict(range=[0, 1], tickformat=".0%"),
+                template="plotly_dark",
+                height=260, margin=dict(t=40, b=20, l=10, r=10)
+            )
+
+            # === UI: mostramos tarjetas con los resultados ===
+            st.markdown('<div class="detail-card">', unsafe_allow_html=True)
+            cTop1, cTop2 = st.columns([0.5, 0.5])
+
+            with cTop1:
+                if fig_teq:
+                    st.plotly_chart(fig_teq, use_container_width=True)
+                st.markdown("**Flujo estelar relativo:** " + S_text)
+                st.markdown("**Radio estimado:** " + Rp_text)
+                st.markdown("**Zona habitable (aprox.):** " + hz_flag)
+
+            with cTop2:
+                st.plotly_chart(fig_comp, use_container_width=True)
+                st.markdown("**Clase:** " + comp_label)
+                st.markdown("**Minerales/Especies probables:**")
+                st.markdown(f"- {minerals}")
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
     else:
         st.info("Selecciona un candidato de la lista de la derecha para ver sus detalles.")
 
@@ -337,6 +580,8 @@ with col2:
                 st.session_state.selected_planet_idx = idx
                 st.rerun()  # ← reemplaza experimental_rerun por rerun
 
+
+# --- SECCIÓN DE DESCARGA (EN SIDEBAR) ---
 
 # --- SECCIÓN DE DESCARGA (EN SIDEBAR) ---
 st.sidebar.header("📁 Fase 2: Exportar")

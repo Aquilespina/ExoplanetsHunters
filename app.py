@@ -4,6 +4,7 @@ import json
 import numpy as np
 import pandas as pd
 import streamlit as st
+import base64
 from joblib import load
 import plotly.graph_objects as go # Usaremos Plotly para gráficos más pro
 
@@ -14,12 +15,20 @@ st.set_page_config(
     layout="wide" # Layout ancho para el dashboard
 )
 
+# ---------------FUNCIÓN PARA CARGAR HOJA DE ESTILOS --------
+def cargar_css(archivo_css):
+    with open(archivo_css) as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+cargar_css("resources/css/estilos_app.css")
+
 # -------------- RUTAS Y CONSTANTES --------------
 ART_DIR = "artifacts"
 MODEL_PATH = os.path.join(ART_DIR, "model_xgb.pkl")
 SCALER_PATH = os.path.join(ART_DIR, "scaler.joblib")
 FEATS_PATH = os.path.join(ART_DIR, "feature_columns.json")
 NASA_LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/e/e5/NASA_logo.svg"
+#EXOPLANET_HUNTER_LOGO = "./resources/img/exoplanet-hunters.jpg"
 EXOPLANET_IMG_URL = "https://exoplanets.nasa.gov/internal_resources/1633" # Imagen genérica de exoplaneta
 
 # -------------- ESTILOS PERSONALIZADOS (CSS) --------------
@@ -173,10 +182,33 @@ if 'selected_planet_idx' not in st.session_state:
     st.session_state.selected_planet_idx = None
 
 # -------------- HEADER DE LA APLICACIÓN --------------
+ruta_img = os.path.join(os.path.dirname(__file__), "resources", "img", "exoplanet-hunters.jpg")
+with open(ruta_img, "rb") as f:
+    datos = f.read()
+exoplanet_hunters_ruta_img = base64.b64encode(datos).decode()
+
+ruta_img_planets = os.path.join(os.path.dirname(__file__), "resources", "img", "planets.png")
+with open(ruta_img_planets, "rb") as f:
+    datos = f.read()
+planets_img = base64.b64encode(datos).decode()
+
 st.markdown(f"""
 <div class="title-container">
     <img src="{NASA_LOGO_URL}" alt="NASA Logo">
+    <img src="data:image/png;base64,{exoplanet_hunters_ruta_img}" width="150">
     <h1>Exoplanets Hunters</h1>
+    <div class="navbar">
+            <div class="nav-left">
+                <img src="data:image/png;base64,{planets_img}" width="50">
+                <a href="#">HOME</a>
+                <a href="#">BROWSE DESTINATIONS</a>
+                <a href="#">MISSIONS</a>
+            </div>
+            <div class="nav-right">
+                <span class="search-icon">🔍</span>
+            </div>
+        </div>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 # -------------- ZONA DE CARGA DE ARCHIVO (SIDEBAR) --------------
@@ -297,10 +329,12 @@ with col1:
             
             c1, c2 = st.columns([0.4, 0.6])
             with c1:
-                st.image(EXOPLANET_IMG_URL, caption=f"Recreación artística")
+                exoplanet_img = os.path.join(os.path.dirname(__file__), "resources", "img", "exoplanet.jpg")
+                st.image(exoplanet_img, caption=f"Recreación artística")
             
             with c2:
                 st.markdown(f"#### Candidato ID: {st.session_state.selected_planet_idx}")
+                st.markdown(f"#### Hostname: {st.session_state.selected_planet_idx}")
                 st.markdown(f"### Probabilidad de ser Exoplaneta:")
                 st.markdown(f"<h1 style='color: #8da0cb;'>{prob_percent:.2f}%</h1>", unsafe_allow_html=True)
 
